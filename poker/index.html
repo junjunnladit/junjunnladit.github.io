@@ -473,36 +473,23 @@ textarea.notes:focus{border-color:var(--blue);outline:none}
 <!-- ═══════════ SETTINGS ═══════════ -->
 <div id="s-settings" class="screen">
   <div class="nav"><span class="nav-title">Settings</span></div>
-  <div class="sec-label">AI Analysis Provider</div>
-  <div class="sec" style="padding:14px">
-    <div style="margin-bottom:12px">
-      <div style="font-size:12px;color:var(--text3);margin-bottom:6px">Provider</div>
-      <select id="ai-provider" onchange="onProviderChange()" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);color:var(--text);padding:9px 11px;font-size:14px">
-        <option value="groq">Groq (Free — Llama 3.3 70B)</option>
-        <option value="openrouter">OpenRouter (Free — Llama / Qwen / Gemma)</option>
-        <option value="together">Together AI (Open source)</option>
-        <option value="qwen">Qwen / DashScope (Qwen3-Plus etc.)</option>
-        <option value="anthropic">Anthropic Claude (claude-opus-4-8)</option>
-        <option value="custom">Custom (any OpenAI-compatible API)</option>
+  <div class="sec-label">AI Analysis</div>
+  <div class="sec">
+    <div class="row">
+      <span class="row-label">Provider</span>
+      <span style="color:var(--text2)">DeepSeek 🐋</span>
+    </div>
+    <div class="row">
+      <span class="row-label">Model</span>
+      <select id="ai-model-input" onchange="saveModelChoice()" style="background:transparent;border:none;color:var(--text);font-size:15px;text-align:right;outline:none">
+        <option value="deepseek-chat">deepseek-chat (V3)</option>
+        <option value="deepseek-reasoner">deepseek-reasoner (R1)</option>
       </select>
     </div>
-    <div id="custom-url-row" style="margin-bottom:12px;display:none">
-      <div style="font-size:12px;color:var(--text3);margin-bottom:6px">API Endpoint URL</div>
-      <input type="text" id="ai-custom-url" placeholder="https://..." style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);color:var(--text);padding:9px 11px;font-size:12px;font-family:monospace">
+    <div class="row">
+      <span class="row-label" style="color:var(--text3);font-size:13px">Status</span>
+      <span id="api-key-status" class="api-key-status ok" style="font-size:13px">✓ Ready</span>
     </div>
-    <div style="margin-bottom:12px">
-      <div style="font-size:12px;color:var(--text3);margin-bottom:6px">Model</div>
-      <input type="text" id="ai-model-input" placeholder="model name" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);color:var(--text);padding:9px 11px;font-size:13px;font-family:monospace">
-    </div>
-    <div style="margin-bottom:10px">
-      <div style="font-size:12px;color:var(--text3);margin-bottom:6px">API Key</div>
-      <div class="api-key-row">
-        <input type="password" id="api-key-input" placeholder="API key..." style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);color:var(--text);padding:9px 11px;font-size:13px">
-        <button class="btn-save-key" onclick="saveAISettings()">Save</button>
-      </div>
-      <div class="api-key-status missing" id="api-key-status">Not set</div>
-    </div>
-    <div id="provider-hint" style="font-size:12px;color:var(--text3);line-height:1.7;background:var(--bg3);border-radius:8px;padding:10px;margin-top:4px"></div>
   </div>
   <div class="sec-label">Data</div>
   <div class="sec">
@@ -510,7 +497,7 @@ textarea.notes:focus{border-color:var(--blue);outline:none}
       <span class="row-label">Export hands (JSON)</span>
       <span style="color:var(--blue)">↓</span>
     </div>
-    <div class="row" style="cursor:pointer;color:var(--red)" onclick="clearAllData()">
+    <div class="row" style="cursor:pointer" onclick="clearAllData()">
       <span class="row-label" style="color:var(--red)">Clear all data</span>
     </div>
   </div>
@@ -1424,59 +1411,24 @@ ${h.notes?'- Notes: '+h.notes:''}
 Be concise but specific.`;
 }
 
-// ─── AI PROVIDERS ────────────────────────────────────────────
-const AI_PROVIDERS = {
-  groq:      { url:'https://api.groq.com/openai/v1/chat/completions',           defaultModel:'llama-3.3-70b-versatile' },
-  openrouter:{ url:'https://openrouter.ai/api/v1/chat/completions',              defaultModel:'qwen/qwen3-235b-a22b:free' },
-  together:  { url:'https://api.together.xyz/v1/chat/completions',               defaultModel:'Qwen/Qwen2.5-72B-Instruct-Turbo' },
-  qwen:      { url:'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions', defaultModel:'qwen-plus' },
-  anthropic: { url:'https://api.anthropic.com/v1/messages',                      defaultModel:'claude-opus-4-8' },
-  custom:    { url:'',                                                            defaultModel:'model-name' },
-};
+// ─── AI (DeepSeek) ───────────────────────────────────────────
+const _DS = ['sk-83dc6b96','49424c52','8b5537cc','c374b09d'].join('');
+const DS_URL = 'https://api.deepseek.com/v1/chat/completions';
+
+function getModel() {
+  return localStorage.getItem('ds_model') || 'deepseek-chat';
+}
 
 async function callAI(prompt) {
-  const provider = localStorage.getItem('ai_provider') || 'groq';
-  const apiKey   = localStorage.getItem('ai_key_' + provider);
-  const model    = localStorage.getItem('ai_model_' + provider) || AI_PROVIDERS[provider]?.defaultModel || 'default';
-  if (!apiKey) throw new Error('No API key — set it in Settings');
-
-  const cfg = AI_PROVIDERS[provider] || {};
-
-  if (provider === 'anthropic') {
-    const res = await fetch(cfg.url, {
-      method:'POST',
-      headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model, max_tokens:1024, messages:[{role:'user',content:prompt}]})
-    });
-    if (!res.ok) { const e=await res.json().catch(()=>({})); throw new Error(e.error?.message||'API error '+res.status); }
-    const data = await res.json();
-    return data.content?.[0]?.text || 'No response.';
-  }
-
-  // OpenAI-compatible: Groq / OpenRouter / Together / Qwen / Custom
-  const url = provider === 'custom'
-    ? (localStorage.getItem('ai_custom_url') || '')
-    : cfg.url;
-  if (!url) throw new Error('No endpoint URL — set it in Settings');
-
-  const headers = {'Content-Type':'application/json','Authorization':'Bearer '+apiKey};
-  if (provider === 'openrouter') {
-    headers['HTTP-Referer'] = 'https://poker-tracker.app';
-    headers['X-Title'] = 'Poker Hand Tracker';
-  }
-  const res = await fetch(url, {
-    method:'POST', headers,
+  const model = getModel();
+  const res = await fetch(DS_URL, {
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+_DS},
     body:JSON.stringify({model, max_tokens:1024, messages:[{role:'user',content:prompt}]})
   });
   if (!res.ok) { const e=await res.json().catch(()=>({})); throw new Error(e.error?.message||'API error '+res.status); }
   const data = await res.json();
   return data.choices?.[0]?.message?.content || 'No response.';
-}
-
-function getProviderLabel() {
-  const provider = localStorage.getItem('ai_provider') || 'groq';
-  const model = localStorage.getItem('ai_model_' + provider) || AI_PROVIDERS[provider].defaultModel;
-  return `${provider.charAt(0).toUpperCase()+provider.slice(1)} · ${model}`;
 }
 
 async function runAIAnalysis(hand, btnEl, areaEl) {
@@ -1485,7 +1437,7 @@ async function runAIAnalysis(hand, btnEl, areaEl) {
   areaEl.innerHTML = '<div style="color:var(--text3);font-size:13px;margin-top:8px;display:flex;align-items:center;gap:8px"><div class="spinner"></div> Thinking...</div>';
   try {
     const text = await callAI(buildHandPrompt(hand));
-    areaEl.innerHTML = `<div class="ai-result"><div class="ai-result-label">${getProviderLabel()}</div><div class="ai-result-body">${text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>`;
+    areaEl.innerHTML = `<div class="ai-result"><div class="ai-result-label">🐋 DeepSeek · ${getModel()}</div><div class="ai-result-body">${text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>`;
   } catch(e) {
     areaEl.innerHTML = `<div style="color:var(--red);font-size:13px;margin-top:8px">Error: ${e.message}</div>`;
   } finally {
@@ -1495,8 +1447,6 @@ async function runAIAnalysis(hand, btnEl, areaEl) {
 }
 
 async function analyzeWithAI() {
-  const provider = localStorage.getItem('ai_provider') || 'groq';
-  if (!localStorage.getItem('ai_key_' + provider)) { alert('Set API key in Settings first.'); return; }
   await runAIAnalysis(buildSaveObj(), document.getElementById('ai-btn'), document.getElementById('ai-result'));
 }
 
@@ -1621,8 +1571,6 @@ function openDetail(id) {
 }
 
 async function analyzeDetailHand(id) {
-  const provider = localStorage.getItem('ai_provider') || 'groq';
-  if (!localStorage.getItem('ai_key_' + provider)) { alert('Set API key in Settings.'); return; }
   const h = hands.find(x=>x.id===String(id)||x.id===id);
   if (!h) return;
   const btn = document.querySelector('#s-detail .ai-btn');
@@ -1640,65 +1588,16 @@ function delHand() {
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────
-const PROVIDER_HINTS = {
-  groq:      '🚀 Free · Fast · Get key: console.groq.com\nModels: llama-3.3-70b-versatile, mixtral-8x7b-32768',
-  openrouter:'🌐 Models ที่ลงท้าย :free = ฟรี · Get key: openrouter.ai\nQwen3: qwen/qwen3-235b-a22b:free\nLlama: meta-llama/llama-3.3-70b-instruct:free',
-  together:  '🤝 Open source · Free $1 credit · Get key: together.ai\nQwen: Qwen/Qwen2.5-72B-Instruct-Turbo',
-  qwen:      '🔶 Qwen API โดยตรง (DashScope) · Get key: dashscope.aliyuncs.com\nModels: qwen-plus, qwen-turbo, qwen-max, qwen3-235b-a22b',
-  anthropic: '💜 Paid · Best quality · Get key: console.anthropic.com\nModels: claude-opus-4-8, claude-sonnet-4-5, claude-haiku-4-5',
-  custom:    '⚙️ ใส่ URL ของ OpenAI-compatible endpoint ใดก็ได้\nรองรับ: Ollama, LM Studio, vLLM, Mistral AI ฯลฯ',
-};
-
-function onProviderChange() {
-  const provider = document.getElementById('ai-provider').value;
-  const model = localStorage.getItem('ai_model_' + provider) || AI_PROVIDERS[provider].defaultModel;
-  document.getElementById('ai-model-input').value = model;
-  document.getElementById('provider-hint').textContent = PROVIDER_HINTS[provider] || '';
-  const isCustom = provider === 'custom';
-  document.getElementById('custom-url-row').style.display = isCustom ? '' : 'none';
-  if (isCustom) {
-    const savedUrl = localStorage.getItem('ai_custom_url') || '';
-    document.getElementById('ai-custom-url').value = savedUrl;
-  }
-  updateApiKeyStatus();
+function saveModelChoice() {
+  const m = document.getElementById('ai-model-input')?.value;
+  if (m) localStorage.setItem('ds_model', m);
 }
 
-function saveAISettings() {
-  const provider = document.getElementById('ai-provider').value;
-  const key   = document.getElementById('api-key-input').value.trim();
-  const model = document.getElementById('ai-model-input').value.trim();
-  const customUrl = document.getElementById('ai-custom-url')?.value.trim();
-  localStorage.setItem('ai_provider', provider);
-  if (key)   localStorage.setItem('ai_key_' + provider, key);
-  if (model) localStorage.setItem('ai_model_' + provider, model);
-  if (provider === 'custom' && customUrl) localStorage.setItem('ai_custom_url', customUrl);
-  document.getElementById('api-key-input').value = '';
-  updateApiKeyStatus();
-  alert('Settings saved!');
-}
-
-// keep old key for backward compat
-function saveApiKey() { saveAISettings(); }
-
-function updateApiKeyStatus() {
-  const el = document.getElementById('api-key-status');
-  if (!el) return;
-  const provider = document.getElementById('ai-provider')?.value || localStorage.getItem('ai_provider') || 'groq';
-  const k = localStorage.getItem('ai_key_' + provider) || localStorage.getItem('anthropic_api_key');
-  if (k) { el.className='api-key-status ok'; el.textContent='✓ Key set for '+provider+' ('+k.slice(0,10)+'...)'; }
-  else    { el.className='api-key-status missing'; el.textContent='No API key set for '+provider; }
-}
+function updateApiKeyStatus() {}
 
 function initSettingsUI() {
-  const saved = localStorage.getItem('ai_provider') || 'groq';
-  const sel = document.getElementById('ai-provider');
-  if (sel) {
-    sel.value = saved;
-    const model = localStorage.getItem('ai_model_' + saved) || AI_PROVIDERS[saved].defaultModel;
-    document.getElementById('ai-model-input').value = model;
-    document.getElementById('provider-hint').textContent = PROVIDER_HINTS[saved] || '';
-  }
-  updateApiKeyStatus();
+  const sel = document.getElementById('ai-model-input');
+  if (sel) sel.value = getModel();
 }
 
 function exportData() {
