@@ -216,6 +216,29 @@ textarea.notes:focus{border-color:var(--blue);outline:none}
   border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
 @keyframes spin{to{transform:rotate(360deg)}}
 
+/* SESSION FILTER BAR */
+.sess-bar{display:flex;gap:6px;padding:10px 12px;overflow-x:auto;border-bottom:1px solid var(--border);
+  background:var(--bg);scrollbar-width:none}
+.sess-bar::-webkit-scrollbar{display:none}
+.sess-chip{flex-shrink:0;background:var(--bg3);border:1px solid var(--border);border-radius:20px;
+  padding:6px 13px;font-size:12px;color:var(--text2);cursor:pointer;white-space:nowrap;transition:all .15s}
+.sess-chip.on{background:var(--blue-dim);border-color:var(--blue);color:var(--blue)}
+
+/* SESSION LIST */
+.sess-card{background:var(--bg2);border-radius:var(--r);margin:8px 12px 0;padding:14px;border:1px solid var(--border)}
+.sess-card.active-sess{border-color:var(--blue)}
+.sess-card-top{display:flex;justify-content:space-between;align-items:flex-start}
+.sess-name{font-size:16px;font-weight:600}
+.sess-meta{font-size:12px;color:var(--text3);margin-top:3px}
+.sess-actions{display:flex;gap:8px;margin-top:12px}
+.sess-btn{flex:1;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);
+  color:var(--text2);font-size:12px;font-weight:500;cursor:pointer;text-align:center}
+.sess-btn.primary{background:var(--blue-dim);border-color:var(--blue);color:var(--blue)}
+.sess-btn.danger{color:var(--red)}
+.sess-active-badge{font-size:10px;font-weight:700;background:var(--blue-dim);color:var(--blue);
+  border-radius:10px;padding:2px 8px;white-space:nowrap}
+.new-sess-form{background:var(--bg2);border-radius:var(--r);margin:8px 12px 0;padding:14px;border:1px dashed var(--border)}
+
 /* HAND LIST */
 .hand-card{background:var(--bg2);border-radius:var(--r);margin:8px 12px 0;padding:14px;
   cursor:pointer;border:1px solid var(--border)}
@@ -269,13 +292,28 @@ textarea.notes:focus{border-color:var(--blue);outline:none}
 
 <!-- ═══════════ HOME ═══════════ -->
 <div id="s-home" class="screen active">
-  <div class="nav"><span class="nav-title">🃏 Poker Tracker</span></div>
+  <div class="nav">
+    <span class="nav-title">🃏 Poker Tracker</span>
+    <button class="nav-btn" onclick="go('s-sessions')" style="font-size:13px">Sessions</button>
+  </div>
+  <div id="sess-filter-bar" class="sess-bar" style="display:none"></div>
   <div id="home-empty" class="empty">
     <div class="empty-icon">♠️</div>
     <div class="empty-title">No hands recorded</div>
     <div style="font-size:14px">Tap + to record your first hand</div>
   </div>
   <div id="home-list"></div>
+</div>
+
+<!-- ═══════════ SESSIONS ═══════════ -->
+<div id="s-sessions" class="screen">
+  <div class="nav">
+    <button class="nav-btn" onclick="go('s-home')">← Back</button>
+    <span class="nav-title">Sessions</span>
+    <button class="nav-btn" onclick="showNewSessionForm()">+ New</button>
+  </div>
+  <div id="new-sess-form-wrap"></div>
+  <div id="sessions-list" style="padding-bottom:8px"></div>
 </div>
 
 <!-- ═══════════ SETUP ═══════════ -->
@@ -446,6 +484,12 @@ textarea.notes:focus{border-color:var(--blue);outline:none}
   <div id="rev-pf" class="ana-card" style="display:none"></div>
   <div id="rev-strength" class="ana-card"></div>
   <div id="rev-icm" class="ana-card" style="display:none"></div>
+  <div class="ana-card" style="padding:0;overflow:hidden">
+    <div class="row" style="min-height:44px">
+      <span class="row-label" style="font-size:13px">Session</span>
+      <span id="rev-session-label" style="font-size:13px;color:var(--text3);cursor:pointer;text-align:right;max-width:60%" onclick="go('s-sessions')">None — tap to set</span>
+    </div>
+  </div>
   <div class="ana-card">
     <div class="ana-title">Tags</div>
     <div id="rev-tags-manual" class="tag-opts"></div>
@@ -494,9 +538,14 @@ textarea.notes:focus{border-color:var(--blue);outline:none}
   <div class="sec-label">Data</div>
   <div class="sec">
     <div class="row" style="cursor:pointer" onclick="exportData()">
-      <span class="row-label">Export hands (JSON)</span>
+      <span class="row-label">Export all (JSON)</span>
       <span style="color:var(--blue)">↓</span>
     </div>
+    <div class="row" style="cursor:pointer" onclick="document.getElementById('import-file-input').click()">
+      <span class="row-label">Import from file</span>
+      <span style="color:var(--blue)">↑</span>
+    </div>
+    <input type="file" id="import-file-input" accept=".json" style="display:none" onchange="importData(this.files[0]);this.value=''">
     <div class="row" style="cursor:pointer" onclick="clearAllData()">
       <span class="row-label" style="color:var(--red)">Clear all data</span>
     </div>
@@ -573,6 +622,9 @@ const MANUAL_TAGS = ['3-Bet','4-Bet','Squeeze','C-Bet','Check-Raise','Bluff','Va
 // ─── STATE ──────────────────────────────────────────────────
 let H = null;
 let hands = [];
+let sessions = [];
+let currentSessionId = null;
+let sessionFilter = null;
 let curDetailId = null;
 let holeSlot = 0;
 let boardSlotIdx = -1;
@@ -584,6 +636,7 @@ let AS = {}; // action state per street: {actions:[]}
 
 // ─── BOOT ────────────────────────────────────────────────────
 (function init() {
+  loadSessions();
   loadHands();
   buildHolePicker();
   buildRankGrid();
@@ -601,6 +654,8 @@ function go(id) {
     document.querySelectorAll('.bnav-btn').forEach(b => b.classList.remove('on'));
     document.querySelector('.bnav-btn').classList.add('on');
   }
+  if (id === 's-review') updateRevSessionLabel();
+  if (id === 's-sessions') renderSessions();
 }
 
 function showTab(id, btn) {
@@ -615,9 +670,27 @@ function showTab(id, btn) {
 function renderHome() {
   const empty = document.getElementById('home-empty');
   const list  = document.getElementById('home-list');
-  if (!hands.length) { empty.style.display=''; list.innerHTML=''; return; }
+  renderSessionFilterBar();
+  const filtered = sessionFilter ? hands.filter(h => h.sessionId === sessionFilter) : hands;
+  if (!filtered.length) { empty.style.display=''; list.innerHTML=''; return; }
   empty.style.display = 'none';
-  list.innerHTML = [...hands].reverse().map(handCard).join('');
+  list.innerHTML = [...filtered].reverse().map(handCard).join('');
+}
+
+function renderSessionFilterBar() {
+  const bar = document.getElementById('sess-filter-bar');
+  if (!sessions.length) { bar.style.display='none'; return; }
+  bar.style.display = 'flex';
+  bar.innerHTML = `<div class="sess-chip${!sessionFilter?' on':''}" onclick="setSessionFilter(null)">All</div>` +
+    sessions.map(s => {
+      const n = hands.filter(h => h.sessionId === s.id).length;
+      return `<div class="sess-chip${sessionFilter===s.id?' on':''}" onclick="setSessionFilter('${s.id}')">${s.name} (${n})</div>`;
+    }).join('');
+}
+
+function setSessionFilter(id) {
+  sessionFilter = id;
+  renderHome();
 }
 
 function handCard(h) {
@@ -1437,12 +1510,18 @@ async function runAIAnalysis(hand, btnEl, areaEl) {
   areaEl.innerHTML = '<div style="color:var(--text3);font-size:13px;margin-top:8px;display:flex;align-items:center;gap:8px"><div class="spinner"></div> Thinking...</div>';
   try {
     const text = await callAI(buildHandPrompt(hand));
-    areaEl.innerHTML = `<div class="ai-result"><div class="ai-result-label">🐋 DeepSeek · ${getModel()}</div><div class="ai-result-body">${text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>`;
+    const ts = Date.now();
+    const hidx = hands.findIndex(x=>x.id===hand.id);
+    if (hidx !== -1) {
+      hands[hidx].aiAnalysis = { text, timestamp: ts };
+      localStorage.setItem('poker_hands', JSON.stringify(hands));
+    }
+    areaEl.innerHTML = `<div class="ai-result"><div class="ai-result-label">🐋 DeepSeek · ${getModel()}${ts?' <span style="opacity:.5;font-weight:400"> · '+new Date(ts).toLocaleString('th-TH')+'</span>':''}</div><div class="ai-result-body">${text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>`;
   } catch(e) {
     areaEl.innerHTML = `<div style="color:var(--red);font-size:13px;margin-top:8px">Error: ${e.message}</div>`;
   } finally {
     btnEl.disabled = false;
-    btnEl.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg> Analyze again';
+    btnEl.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg> Re-analyze';
   }
 }
 
@@ -1469,6 +1548,7 @@ function buildSaveObj() {
     profit: +H.profit||0,
     tags: H.tags,
     notes: document.getElementById('rev-notes').value.trim(),
+    sessionId: currentSessionId || null,
   };
 }
 
@@ -1563,10 +1643,14 @@ function openDetail(id) {
       <div class="ana-title">AI Analysis</div>
       <button class="ai-btn" onclick="analyzeDetailHand('${id}')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-        Analyze Hand
+        ${h.aiAnalysis ? 'Re-analyze' : 'Analyze Hand'}
       </button>
       <div id="detail-ai-result"></div>
     </div>`;
+  if (h.aiAnalysis) {
+    const a = h.aiAnalysis;
+    document.getElementById('detail-ai-result').innerHTML = `<div class="ai-result"><div class="ai-result-label">🐋 DeepSeek <span style="opacity:.5;font-weight:400"> · ${new Date(a.timestamp).toLocaleString('th-TH')}</span></div><div class="ai-result-body">${a.text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>`;
+  }
   go('s-detail');
 }
 
@@ -1587,6 +1671,114 @@ function delHand() {
   go('s-home');
 }
 
+// ─── SESSIONS ────────────────────────────────────────────────
+function loadSessions() {
+  try { sessions = JSON.parse(localStorage.getItem('poker_sessions')||'[]'); } catch { sessions=[]; }
+  currentSessionId = localStorage.getItem('poker_current_session') || null;
+  if (currentSessionId && !sessions.find(s=>s.id===currentSessionId)) currentSessionId = null;
+}
+
+function saveSessions() {
+  localStorage.setItem('poker_sessions', JSON.stringify(sessions));
+}
+
+function setCurrentSession(id) {
+  currentSessionId = id;
+  if (id) localStorage.setItem('poker_current_session', id);
+  else localStorage.removeItem('poker_current_session');
+  updateRevSessionLabel();
+  renderSessionFilterBar();
+}
+
+function updateRevSessionLabel() {
+  const el = document.getElementById('rev-session-label');
+  if (!el) return;
+  const s = sessions.find(x=>x.id===currentSessionId);
+  el.textContent = s ? s.name : 'None — tap to set';
+  el.style.color = s ? 'var(--blue)' : 'var(--text3)';
+}
+
+function showNewSessionForm() {
+  const wrap = document.getElementById('new-sess-form-wrap');
+  if (wrap.innerHTML) { wrap.innerHTML=''; return; }
+  wrap.innerHTML = `
+    <div class="new-sess-form">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px">New Session</div>
+      <input id="new-sess-name" placeholder="e.g. Casino XYZ – June 13" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);color:var(--text);font-size:14px;padding:9px 11px;outline:none;margin-bottom:8px">
+      <textarea id="new-sess-note" placeholder="Notes (optional)" rows="2" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);color:var(--text);font-size:13px;padding:9px 11px;outline:none;resize:none;line-height:1.5"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="sess-btn" onclick="document.getElementById('new-sess-form-wrap').innerHTML=''">Cancel</button>
+        <button class="sess-btn primary" onclick="createSession()">Create & Set Active</button>
+      </div>
+    </div>`;
+  document.getElementById('new-sess-name').focus();
+}
+
+function createSession() {
+  const name = document.getElementById('new-sess-name')?.value.trim();
+  const note = document.getElementById('new-sess-note')?.value.trim() || '';
+  if (!name) { alert('Please enter a session name.'); return; }
+  const sess = { id: 'sess_'+Date.now(), name, createdAt: Date.now(), note };
+  sessions.unshift(sess);
+  saveSessions();
+  setCurrentSession(sess.id);
+  document.getElementById('new-sess-form-wrap').innerHTML = '';
+  renderSessions();
+  renderHome();
+}
+
+function deleteSession(id) {
+  const s = sessions.find(x=>x.id===id);
+  const n = hands.filter(h=>h.sessionId===id).length;
+  if (!confirm(`Delete session "${s?.name}"?\n\n${n} hand(s) will remain but unlinked from this session.`)) return;
+  sessions = sessions.filter(x=>x.id!==id);
+  saveSessions();
+  if (currentSessionId===id) setCurrentSession(null);
+  renderSessions();
+  renderHome();
+}
+
+function exportSession(id) {
+  const sess = sessions.find(x=>x.id===id);
+  const sessionHands = hands.filter(h=>h.sessionId===id);
+  const filename = `poker-${(sess?.name||'session').replace(/[^a-z0-9]/gi,'-')}-${new Date().toISOString().slice(0,10)}.json`;
+  const blob = new Blob([JSON.stringify({version:2, exportedAt:new Date().toISOString(), sessions:sess?[sess]:[], hands:sessionHands},null,2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url);
+}
+
+function renderSessions() {
+  const list = document.getElementById('sessions-list');
+  if (!list) return;
+  if (!sessions.length) {
+    list.innerHTML = `<div class="empty" style="padding:40px 24px"><div class="empty-icon">📁</div><div class="empty-title">No sessions yet</div><div style="font-size:14px">Tap "+ New" to create your first session</div></div>`;
+    return;
+  }
+  list.innerHTML = sessions.map(s => {
+    const n = hands.filter(h=>h.sessionId===s.id).length;
+    const isActive = s.id === currentSessionId;
+    const date = new Date(s.createdAt).toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'numeric'});
+    return `<div class="sess-card${isActive?' active-sess':''}">
+      <div class="sess-card-top">
+        <div>
+          <div class="sess-name">${escHtml(s.name)}</div>
+          <div class="sess-meta">${date} · ${n} hand${n!==1?'s':''}</div>
+          ${s.note?`<div class="sess-meta" style="margin-top:3px">${escHtml(s.note)}</div>`:''}
+        </div>
+        ${isActive?'<span class="sess-active-badge">Active</span>':''}
+      </div>
+      <div class="sess-actions">
+        ${isActive
+          ? `<button class="sess-btn" onclick="setCurrentSession(null);renderSessions()">Deactivate</button>`
+          : `<button class="sess-btn primary" onclick="setCurrentSession('${s.id}');renderSessions()">Set Active</button>`
+        }
+        <button class="sess-btn" onclick="exportSession('${s.id}')">Export</button>
+        <button class="sess-btn danger" onclick="deleteSession('${s.id}')">Delete</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
 // ─── SETTINGS ────────────────────────────────────────────────
 function saveModelChoice() {
   const m = document.getElementById('ai-model-input')?.value;
@@ -1601,18 +1793,53 @@ function initSettingsUI() {
 }
 
 function exportData() {
-  const blob=new Blob([JSON.stringify(hands,null,2)],{type:'application/json'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url; a.download=`poker-hands-${new Date().toISOString().slice(0,10)}.json`;
+  const payload = { version: 2, exportedAt: new Date().toISOString(), sessions, hands };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href=url; a.download=`poker-all-${new Date().toISOString().slice(0,10)}.json`;
   a.click(); URL.revokeObjectURL(url);
 }
 
+function importData(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const raw = JSON.parse(e.target.result);
+      let importedHands, importedSessions;
+      if (Array.isArray(raw)) {
+        importedHands = raw; importedSessions = [];
+      } else {
+        importedHands = raw.hands || []; importedSessions = raw.sessions || [];
+      }
+      const existingSessIds = new Set(sessions.map(s=>s.id));
+      let addedSess = 0;
+      importedSessions.forEach(s => { if (!existingSessIds.has(s.id)) { sessions.push(s); addedSess++; } });
+      const existingHandIds = new Set(hands.map(h=>h.id));
+      let addedHands = 0;
+      importedHands.forEach(h => { if (!existingHandIds.has(String(h.id))) { hands.push(h); addedHands++; } });
+      hands.sort((a,b) => new Date(b.timestamp)-new Date(a.timestamp));
+      saveSessions();
+      localStorage.setItem('poker_hands', JSON.stringify(hands));
+      renderHome();
+      renderSessions();
+      alert(`Imported ${addedHands} hand(s) and ${addedSess} session(s).`);
+    } catch(err) {
+      alert('Import failed: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
 function clearAllData() {
-  if(!confirm('Delete ALL hands? This cannot be undone.')) return;
-  hands=[];
+  if(!confirm('Delete ALL hands and sessions? This cannot be undone.')) return;
+  hands=[]; sessions=[]; currentSessionId=null;
   localStorage.removeItem('poker_hands');
+  localStorage.removeItem('poker_sessions');
+  localStorage.removeItem('poker_current_session');
   renderHome();
+  renderSessions();
 }
 
 // ─── UTILS ───────────────────────────────────────────────────
