@@ -576,7 +576,8 @@ textarea.notes:focus{border-color:var(--blue);outline:none}
   <div class="nav">
     <button class="nav-btn" onclick="go('s-home')">← Back</button>
     <span class="nav-title" id="detail-title">Hand Review</span>
-    <button class="nav-btn danger" onclick="delHand()">Delete</button>
+    <button class="nav-btn" onclick="editHand(curDetailId)">Edit</button>
+    <button class="nav-btn danger" onclick="delHand()" style="margin-left:10px">Delete</button>
   </div>
   <div id="detail-body" style="padding-bottom:8px"></div>
 </div>
@@ -622,7 +623,7 @@ textarea.notes:focus{border-color:var(--blue);outline:none}
       <button class="sb2" data-suit="c" onclick="confirmRankSuit('c')">♣</button>
     </div>
     <button class="rp-clear" onclick="clearRankCard()">Clear Card</button>
-    <div style="font-size:11px;color:var(--text3);margin:14px 0 6px">Unknown / ลืม</div>
+    <div style="font-size:11px;color:var(--text3);margin:14px 0 6px">Unknown</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap">
       <button class="sb2" onclick="confirmUnknown('?')" style="font-size:16px;color:var(--text3);background:#2a2d3e;border-color:var(--text3)">?</button>
       <button class="sb2" onclick="confirmUnknown('s')" style="color:#1a1a1a">?♠</button>
@@ -740,7 +741,7 @@ function renderDraftBanner() {
   const label = screenNames[draftScreen] || 'Hand';
   const banner = document.createElement('div');
   banner.className = 'draft-banner';
-  banner.innerHTML = `🃏 มีแฮนด์ที่กำลังบันทึก (${label}) — <strong>แตะเพื่อกลับ</strong>`;
+  banner.innerHTML = `🃏 Hand in progress (${label}) — <strong>tap to resume</strong>`;
   banner.onclick = () => showTab('s-home', document.querySelector('.bnav-btn'));
   document.querySelector('#' + activeScreen + ' .nav').after(banner);
 }
@@ -780,7 +781,7 @@ function handCard(h) {
   const pStr = parseFloat(h.profit)||0;
   const resClass = h.result||'fold';
   const resText = h.profit ? (pStr>0?'+':'')+pStr+' chips' : h.result||'—';
-  const date = new Date(h.timestamp).toLocaleDateString('th-TH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  const date = new Date(h.timestamp).toLocaleDateString('en-GB',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
   const tags = (h.tags||[]).map(t=>`<span class="hc-tag">${t}</span>`).join('');
   const noteStr = h.notes ? `<div class="hc-note">${h.notes.slice(0,80)}${h.notes.length>80?'…':''}</div>` : '';
   return `<div class="hand-card" onclick="openDetail('${h.id}')">
@@ -804,7 +805,7 @@ function newHand() {
     setup: {}, hole: [null,null], board: [null,null,null,null,null],
     villainCards: [null,null],
     streets: {pre:[],flop:[],turn:[],river:[]},
-    result: null, profit: null, tags: [], notes: ''
+    result: null, split: false, profit: null, tags: [], notes: ''
   };
   AS = { pre:{actions:[]}, flop:{actions:[]}, turn:{actions:[]}, river:{actions:[]} };
   [0,1].forEach(i => resetHoleSlot(i));
@@ -844,7 +845,7 @@ function setupNext() {
 function buildHolePicker() {
   const wrap = document.getElementById('hole-picker');
   const unknownRow = `<div class="suit-row-p">
-    <div class="suit-hdr" style="color:var(--text3)">Unknown / ลืม</div>
+    <div class="suit-hdr" style="color:var(--text3)">Unknown</div>
     <div class="cards-row">
       <div class="pc" data-cid="??" onclick="pickHoleCard(this,'??')"
         style="background:#2a2d3e;border:2px dashed var(--text3);color:var(--text3)">
@@ -932,20 +933,29 @@ function fillCardSlot(elId, card) {
 function parseCard(s) { return {rank:s[0], suit:s[1]}; }
 
 // ─── STREETS ────────────────────────────────────────────────
-function cardsNext() {
-  for(let i=0;i<5;i++){const e=document.getElementById(`bs-${i}`);if(e){e.className='card-slot';e.innerHTML='+';}}
-  H.board = [null,null,null,null,null];
-  H.villainCards = [null,null];
-  [0,1].forEach(i=>{const e=document.getElementById(`v-slot-${i}`);if(e){e.className='card-slot';e.innerHTML='+';};});
-  ['flop','turn','river'].forEach(s=>document.getElementById(`sec-${s}`).style.display='none');
-  document.getElementById('sd-eval').innerHTML='';
-  document.getElementById('i-profit').value='';
-  document.querySelectorAll('.res-btn').forEach(b=>b.classList.remove('on'));
-  H.result=null;
-  AS = {pre:{actions:[]},flop:{actions:[]},turn:{actions:[]},river:{actions:[]}};
-  STREETS_LIST.forEach(s=>{document.getElementById(`ae-${s}`).innerHTML='';document.getElementById(`pot-${s}`).innerHTML='';});
-  updateStreetsTitle();
+// Render the Streets screen purely from current H/AS state. Non-destructive,
+// so navigating Back to the card picker and forward again keeps all entered
+// data. (New hands already start with empty state from newHand.)
+function renderStreetsScreen() {
+  const board = H.board;
+  for (let i=0;i<5;i++){ const e=document.getElementById(`bs-${i}`); if(e){ if(board[i]) fillCardSlot(`bs-${i}`,board[i]); else {e.className='card-slot';e.innerHTML='+';} } }
+  [0,1].forEach(i=>{ const e=document.getElementById(`v-slot-${i}`); if(e){ if(H.villainCards[i]) fillCardSlot(`v-slot-${i}`,H.villainCards[i]); else {e.className='card-slot';e.innerHTML='+';} } });
+  // Reveal streets that already have a board card or recorded action
+  document.getElementById('sec-flop').style.display  = (board.slice(0,3).some(Boolean)||AS.flop.actions.length)  ? '' : 'none';
+  document.getElementById('sec-turn').style.display  = (board[3]||AS.turn.actions.length)   ? '' : 'none';
+  document.getElementById('sec-river').style.display = (board[4]||AS.river.actions.length)  ? '' : 'none';
+  STREETS_LIST.forEach(s => renderAE(s));
   renderPots();
+  document.querySelectorAll('.res-btn').forEach(b=>b.classList.remove('on'));
+  if (H.result) document.querySelector(`.res-btn.${H.result}`)?.classList.add('on');
+  document.getElementById('i-profit').value = H.profit!=null ? H.profit : '';
+  document.getElementById('sd-eval').innerHTML='';
+  autoEvaluate();
+  updateStreetsTitle();
+}
+
+function cardsNext() {
+  renderStreetsScreen();
   go('s-streets');
 }
 
@@ -983,12 +993,29 @@ function getSeenPositions(upToStreet, upToIdx) {
   return seen;
 }
 
+// Postflop betting order (first to act → last): SB, BB, then around the table.
+const POSTFLOP_ORDER = ['SB','BB','UTG','UTG+1','MP','HJ','CO','BTN'];
+
+// Resolve a pos label ('Hero'/'Villain'/named) to its actual table seat so we
+// can order it. Hero and Villain sit at the seats chosen during setup.
+function seatOf(pos) {
+  if (pos === 'Hero') return H?.setup?.hpos || null;
+  if (pos === 'Villain') return H?.setup?.vpos || null;
+  return pos;
+}
+
+function postflopRank(pos) {
+  const i = POSTFLOP_ORDER.indexOf(seatOf(pos));
+  return i === -1 ? 99 : i;
+}
+
 function getActivePositions(currentStreet, upToIdx) {
   const folded = getFoldedPositions(currentStreet, upToIdx);
 
   if (currentStreet === 'pre') {
-    // Preflop: any named position can be added (we're building the action log)
-    return ['Villain', ...POSITIONS.filter(p => !folded.has(p))];
+    // Preflop: any named position can be added (we're building the action log).
+    // "Villain" is a catch-all kept at the bottom of the list.
+    return [...POSITIONS.filter(p => !folded.has(p)), 'Villain'];
   }
 
   // Post-flop: only positions already seen in this hand (preflop + earlier streets + current street so far)
@@ -998,15 +1025,31 @@ function getActivePositions(currentStreet, upToIdx) {
     if (a.pos && a.pos !== 'Villain') seen.add(a.pos);
   });
 
-  const active = [...seen].filter(p => !folded.has(p));
-  // preserve order matching POSITIONS list
-  const ordered = POSITIONS.filter(p => active.includes(p));
-  return ['Villain', ...ordered];
+  // Named positions ordered by real postflop seat: SB first, BB next, around to BTN.
+  const active = [...seen].filter(p => !folded.has(p) && p !== 'Villain')
+    .sort((a, b) => postflopRank(a) - postflopRank(b));
+  // "Villain" always sits at the bottom of the dropdown.
+  if (!folded.has('Villain')) active.push('Villain');
+  return active;
 }
 
 function addAction(street) {
   const active = getActivePositions(street, AS[street].actions.length);
-  const defaultPos = active.includes('Hero') ? 'Hero' : active[0] || 'Villain';
+  let defaultPos;
+  if (street === 'pre') {
+    defaultPos = active.includes('Hero') ? 'Hero' : active[0] || 'Villain';
+  } else {
+    // Postflop: auto-fill the next player to act after the last entry, in table
+    // order. Skip the "Villain" catch-all — only named seats are auto-selected.
+    const named = active.filter(p => p !== 'Villain');
+    const acts = AS[street].actions;
+    if (!acts.length) {
+      defaultPos = named[0] || 'Villain';
+    } else {
+      const lastRank = postflopRank(acts[acts.length - 1].pos);
+      defaultPos = named.find(p => postflopRank(p) > lastRank) || named[0] || 'Villain';
+    }
+  }
   AS[street].actions.push({pos: defaultPos, type:'Bet', size:''});
   renderAE(street);
 }
@@ -1105,8 +1148,9 @@ function renderAE(street) {
         <button class="ae-del" onclick="removeAction('${street}',${i})">✕</button>
       </div>
       <div class="ae-btns">${btns}</div>
-      ${needsSize ? `<input class="ae-size" type="number" placeholder="${a.type==='Call'&&lb?'Call '+lb:'Size (chips)'}" value="${a.size}" oninput="AS['${street}'].actions[${i}].size=this.value;renderPots();autoUpdateProfit()">` : ''}
+      ${needsSize ? `<input class="ae-size" type="number" placeholder="${a.type==='Call'&&lb?'Call '+lb:'Total amount(chips)'}" value="${a.size}" oninput="AS['${street}'].actions[${i}].size=this.value;renderPots();autoUpdateProfit()">` : ''}
       ${a.type==='Call'&&lb&&!a.size ? `<div class="ae-hint">↑ Calling ${lb} chips</div>` : ''}
+      ${['Bet','Raise'].includes(a.type) ? `<div class="ae-hint">Enter the total amount bet TO, not the raise increment.</div>` : ''}
       ${allinHint}
     </div>`;
   }).join('');
@@ -1201,7 +1245,9 @@ function selectRank(r) {
 
 function updateSuitBtns() {
   const used = usedCards();
-  document.querySelectorAll('.sb2').forEach(b => {
+  // Only the ranked suit buttons depend on a selected rank — the Unknown
+  // buttons live outside #suit-grid and must always stay selectable.
+  document.querySelectorAll('#suit-grid .sb2').forEach(b => {
     const cid = rpSelectedRank ? rpSelectedRank+b.dataset.suit : null;
     b.disabled = !rpSelectedRank || (cid && used.has(cid));
   });
@@ -1212,10 +1258,8 @@ function usedCards() {
     .filter(Boolean).filter(c => c.rank !== '?').map(c=>c.rank+c.suit));
 }
 
-function confirmRankSuit(suit) {
-  if (!rpSelectedRank) { alert('Pick a rank first'); return; }
-  const cid = rpSelectedRank+suit;
-  const card = parseCard(cid);
+// Place a picked card into the current rank-picker target (villain or board).
+function placePickedCard(card) {
   if (rpTarget.type==='villain') {
     H.villainCards[rpTarget.idx] = card;
     fillCardSlot(`v-slot-${rpTarget.idx}`, card);
@@ -1230,6 +1274,11 @@ function confirmRankSuit(suit) {
     updateStreetsTitle();
     autoEvaluate();
   }
+}
+
+function confirmRankSuit(suit) {
+  if (!rpSelectedRank) { alert('Pick a rank first'); return; }
+  placePickedCard(parseCard(rpSelectedRank+suit));
 }
 
 function clearRankCard() {
@@ -1249,21 +1298,7 @@ function clearRankCard() {
 }
 
 function confirmUnknown(suit) {
-  const card = {rank:'?', suit};
-  if (rpTarget.type==='villain') {
-    H.villainCards[rpTarget.idx] = card;
-    fillCardSlot(`v-slot-${rpTarget.idx}`, card);
-    closeRankPicker();
-    if (rpTarget.idx===0 && !H.villainCards[1]) setTimeout(()=>openVillainCard(1),200);
-    autoEvaluate();
-  } else if (rpTarget.type==='board') {
-    H.board[rpTarget.idx] = card;
-    fillCardSlot(`bs-${rpTarget.idx}`, card);
-    closeRankPicker();
-    closeBoard();
-    updateStreetsTitle();
-    autoEvaluate();
-  }
+  placePickedCard({rank:'?', suit});
 }
 
 function closeRankPicker() {
@@ -1286,7 +1321,7 @@ function refreshBoardPicker() {
   const used = usedCards();
   const wrap = document.getElementById('board-picker');
   const unknownRow = `<div class="suit-row-p">
-    <div class="suit-hdr" style="color:var(--text3)">Unknown / ลืม</div>
+    <div class="suit-hdr" style="color:var(--text3)">Unknown</div>
     <div class="cards-row">
       <div class="pc" onclick="pickBoardCard('??')"
         style="background:#2a2d3e;border:2px dashed var(--text3);color:var(--text3)">
@@ -1365,6 +1400,14 @@ function cmpScore(a,b) {
   return 0;
 }
 
+// Pure poker logic — no DOM, no app state. Grouped so it can be unit-tested
+// (e.g. straights, flushes, boats, splits) independently of the UI.
+// Note: handPct is a rough preflop heuristic, NOT a real equity simulation.
+const Poker = { evaluate5, bestHand, cmpScore,
+  handCat: h => handCat(h), handPct: h => handPct(h), handName: h => handName(h),
+  pfThreshold: (pos,eff) => pfThreshold(pos,eff) };
+if (typeof window !== 'undefined') window.Poker = Poker;
+
 // ─── AUTO EVALUATE (showdown) ─────────────────────────────────
 function autoEvaluate() {
   const board = [...H.board.slice(0,3),...H.board.slice(3)].filter(Boolean);
@@ -1386,7 +1429,8 @@ function autoEvaluate() {
   const resColor = outcome==='win'?'var(--green)':outcome==='lose'?'var(--red)':'var(--gold)';
   const resText = outcome==='win'?'Hero wins 🏆':outcome==='lose'?'Hero loses':'Split pot';
 
-  // Auto-set result
+  // Auto-set result. A split is tracked separately so profit halves the pot.
+  H.split = (outcome === 'split');
   H.result = outcome==='split'?'win':outcome;
   document.querySelectorAll('.res-btn').forEach(b=>b.classList.remove('on'));
   document.querySelector(`.res-btn.${H.result}`)?.classList.add('on');
@@ -1402,26 +1446,54 @@ function autoEvaluate() {
 }
 
 // ─── PROFIT AUTO-CALC ─────────────────────────────────────────
-function calcHeroInvestment() {
+// Total chips a player put in across all streets (their preflop "to" amount
+// already includes any blind they posted, mirroring calcStreetContrib).
+function playerTotalContrib(pos) {
   let inv=0;
   STREETS_LIST.forEach(street=>{
-    const sizes=AS[street].actions.filter(a=>a.pos==='Hero'&&['Bet','Raise','Call','All-in'].includes(a.type)).map(a=>parseFloat(a.size)||0);
+    const sizes=(AS[street]?.actions||[]).filter(a=>a.pos===pos&&['Bet','Raise','Call','All-in'].includes(a.type)).map(a=>parseFloat(a.size)||0);
     if(sizes.length) inv+=Math.max(0,...sizes);
   });
   return inv;
 }
 
+function calcHeroInvestment() { return playerTotalContrib('Hero'); }
+
+// Net chips Hero wins, capped per opponent so an all-in for less than the
+// total pot only collects up to Hero's own contribution from each player
+// (side-pot aware). Dead money (antes + blinds from players who never acted)
+// is whatever the running pot has beyond the tracked contributions.
+function calcHeroNetWin() {
+  const heroC = playerTotalContrib('Hero');
+  const seen = new Set();
+  STREETS_LIST.forEach(s => (AS[s]?.actions||[]).forEach(a => { if (a.pos) seen.add(a.pos); }));
+  let contribSum = 0, matched = 0;
+  seen.forEach(p => {
+    const c = playerTotalContrib(p);
+    contribSum += c;
+    if (p !== 'Hero') matched += Math.min(c, heroC);
+  });
+  const dead = Math.max(0, calcRunningPot('river') - contribSum);
+  return matched + dead;
+}
+
 function autoUpdateProfit() {
   if (!H.result) return;
-  const pot = calcRunningPot('river');
   const heroInv = calcHeroInvestment();
   const el = document.getElementById('i-profit');
-  if (H.result==='win'&&pot>0) el.value = Math.round(pot-heroInv);
-  else if ((H.result==='lose'||H.result==='fold')&&heroInv>0) el.value = -Math.round(heroInv);
+  if (H.split) {
+    // Hero collects roughly half of what they'd win outright in a chopped pot.
+    el.value = Math.round(calcHeroNetWin()/2 - heroInv/2);
+  } else if (H.result==='win') {
+    el.value = Math.round(calcHeroNetWin());
+  } else if ((H.result==='lose'||H.result==='fold')&&heroInv>0) {
+    el.value = -Math.round(heroInv);
+  }
 }
 
 function setOutcome(val, btn) {
   H.result = val;
+  H.split = false; // manual outcome overrides an auto-detected split
   document.querySelectorAll('.res-btn').forEach(b=>b.classList.remove('on'));
   btn.classList.add('on');
   autoUpdateProfit();
@@ -1538,16 +1610,16 @@ function toggleTag(el, tag) {
 }
 
 // ─── HAND ANALYSIS ───────────────────────────────────────────
-function handCat() {
-  const [c1,c2]=H.hole;
+function handCat(hole) {
+  const [c1,c2]=hole || (H&&H.hole) || [];
   if(!c1||!c2) return null;
   const v1=RV[c1.rank],v2=RV[c2.rank];
   const hi=Math.max(v1,v2),lo=Math.min(v1,v2);
   return {hi,lo,suited:c1.suit===c2.suit,paired:v1===v2,gap:hi-lo};
 }
 
-function handPct() {
-  const cat=handCat(); if(!cat) return 0;
+function handPct(hole) {
+  const cat=handCat(hole); if(!cat) return 0;
   const {hi,lo,suited,paired,gap}=cat;
   if(paired){if(hi>=13)return 87;if(hi>=10)return 74;if(hi>=7)return 60;return 46;}
   const bw={'14-13':[88,83],'14-12':[84,78],'14-11':[79,71],'14-10':[76,67],'13-12':[73,64],'13-11':[68,59],'13-10':[64,55],'12-11':[63,54],'12-10':[59,50],'11-10':[58,49]};
@@ -1559,8 +1631,8 @@ function handPct() {
   return Math.min(58,Math.max(8,hiN*3.2+loN*1.4-gap*3+(suited?5:0)+(gap<=1?3:0)));
 }
 
-function handName() {
-  const cat=handCat(); if(!cat) return 'Unknown';
+function handName(hole) {
+  const cat=handCat(hole); if(!cat) return 'Unknown';
   const {hi,lo,suited,paired,gap}=cat;
   if(paired&&hi>=13) return 'Premium Pair';
   if(paired&&hi>=10) return 'Big Pair';
@@ -1579,9 +1651,9 @@ function strengthAnalysis() {
   const res=[];
   const pct=handPct(), name=handName(), cat=handCat();
   const board=H.board.filter(Boolean);
-  if(pct>=70) res.push({t:'good',i:'💪',txt:`${name} — top ${Math.round(100-pct)}% preflop. Strong holding.`});
-  else if(pct>=48) res.push({t:'warn',i:'📊',txt:`${name} — playable, ~${Math.round(pct)}th percentile.`});
-  else res.push({t:'bad',i:'⚠️',txt:`${name} — below average. Needs good conditions.`});
+  if(pct>=70) res.push({t:'good',i:'💪',txt:`${name} — ~top ${Math.round(100-pct)}% preflop (est., not exact equity). Strong holding.`});
+  else if(pct>=48) res.push({t:'warn',i:'📊',txt:`${name} — playable, ~${Math.round(pct)}th percentile (rough preflop estimate).`});
+  else res.push({t:'bad',i:'⚠️',txt:`${name} — below average (rough preflop estimate). Needs good conditions.`});
   if(cat&&cat.suited&&cat.gap<=2) res.push({t:'info',i:'🎯',txt:'Double draw potential: flush + straight draws possible on connected boards.'});
   if(board.length>=5) {
     const hScore=bestHand(H.hole,board);
@@ -1730,7 +1802,7 @@ async function runAIAnalysis(hand, btnEl, areaEl) {
       hands[hidx].aiAnalysis = { text, timestamp: ts };
       localStorage.setItem('poker_hands', JSON.stringify(hands));
     }
-    areaEl.innerHTML = `<div class="ai-result"><div class="ai-result-label">🐋 DeepSeek · ${getModel()}${ts?' <span style="opacity:.5;font-weight:400"> · '+new Date(ts).toLocaleString('th-TH')+'</span>':''}</div><div class="ai-result-body">${text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>`;
+    areaEl.innerHTML = `<div class="ai-result"><div class="ai-result-label">🐋 DeepSeek · ${getModel()}${ts?' <span style="opacity:.5;font-weight:400"> · '+new Date(ts).toLocaleString('en-GB')+'</span>':''}</div><div class="ai-result-body">${text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>`;
   } catch(e) {
     areaEl.innerHTML = `<div style="color:var(--red);font-size:13px;margin-top:8px">Error: ${e.message}</div>`;
   } finally {
@@ -1748,17 +1820,19 @@ function buildSaveObj() {
   const {sb,bb,ante,anteType:at,players,stage,hpos,hs,vpos,vs} = H.setup;
   return {
     id: H.id,
-    timestamp: new Date().toISOString(),
+    timestamp: H.timestamp || new Date().toISOString(),
     blinds: `${sb}/${bb}`,
     ante, anteType:at, players, stage,
     position: hpos,
-    stackBB: Math.round(hs/bb),
-    effBB: Math.round(Math.min(hs,vs)/bb),
+    hs, vs, // raw stacks kept so the hand can be re-edited losslessly
+    stackBB: hs ? Math.round(hs/bb) : null,
+    effBB: (hs&&vs) ? Math.round(Math.min(hs,vs)/bb) : null,
     holeCards: H.hole,
     villainCards: H.villainCards,
     board: H.board,
     actions: {pre:AS.pre.actions, flop:AS.flop.actions, turn:AS.turn.actions, river:AS.river.actions},
     result: H.result,
+    split: !!H.split,
     profit: +H.profit||0,
     tags: H.tags,
     notes: document.getElementById('rev-notes').value.trim(),
@@ -1776,6 +1850,66 @@ function saveHand() {
   go('s-home');
   document.querySelectorAll('.bnav-btn').forEach(b=>b.classList.remove('on'));
   document.querySelector('.bnav-btn').classList.add('on');
+}
+
+// Load a previously saved hand back into the recording flow for editing.
+// Saving again overwrites the original (saveHand matches on id).
+function editHand(id) {
+  const hand = hands.find(x=>String(x.id)===String(id));
+  if (!hand) return;
+
+  const [sb, bb] = String(hand.blinds||'0/0').split('/').map(n=>+n||0);
+  // Reconstruct stacks: prefer raw hs/vs, else fall back to the rounded BB counts.
+  const hs = hand.hs != null ? hand.hs : (hand.stackBB ? hand.stackBB*bb : null);
+  const vs = hand.vs != null ? hand.vs : (hand.effBB ? hand.effBB*bb : null);
+
+  anteType = hand.anteType || 'bba';
+  const board = (hand.board||[]).slice(0,5);
+  while (board.length < 5) board.push(null);
+
+  H = {
+    id: hand.id,
+    ts: Date.now(),
+    timestamp: hand.timestamp, // preserve original record date
+    setup: { stage:hand.stage, sb, bb, ante:hand.ante||0, anteType,
+             players:hand.players||9, hpos:hand.position, hs, vpos:hand.vpos||null, vs },
+    hole: [hand.holeCards?.[0]||null, hand.holeCards?.[1]||null],
+    board,
+    villainCards: [hand.villainCards?.[0]||null, hand.villainCards?.[1]||null],
+    streets: {pre:[],flop:[],turn:[],river:[]},
+    result: hand.result||null, split: !!hand.split,
+    profit: hand.profit!=null ? String(hand.profit) : null,
+    tags: [...(hand.tags||[])], notes: hand.notes||''
+  };
+  const a = hand.actions || {};
+  AS = {
+    pre:   {actions: [...(a.pre||a.preflop||[])]},
+    flop:  {actions: [...(a.flop||[])]},
+    turn:  {actions: [...(a.turn||[])]},
+    river: {actions: [...(a.river||[])]},
+  };
+  currentSessionId = hand.sessionId || null;
+  draftScreen = null;
+
+  // Populate the setup form so going Back stays consistent.
+  document.getElementById('i-stage').value   = H.setup.stage || 'early';
+  document.getElementById('i-sb').value       = sb;
+  document.getElementById('i-bb').value       = bb;
+  document.getElementById('i-ante').value     = H.setup.ante || 0;
+  document.getElementById('i-players').value  = H.setup.players;
+  document.getElementById('i-hpos').value     = H.setup.hpos || 'BTN';
+  document.getElementById('i-hstack').value   = hs != null ? hs : '';
+  document.getElementById('i-vpos').value     = H.setup.vpos || 'BB';
+  document.getElementById('i-vstack').value   = vs != null ? vs : '';
+  document.querySelectorAll('[data-ante]').forEach(e=>e.classList.toggle('on', e.dataset.ante===anteType));
+
+  // Hole cards
+  [0,1].forEach(i => H.hole[i] ? fillCardSlot(`slot-${i}`, H.hole[i]) : resetHoleSlot(i));
+  document.getElementById('btn-cards-next').disabled = !(H.hole[0]&&H.hole[1]);
+
+  // Board, villain, actions, pots, result, profit — all from current state
+  renderStreetsScreen();
+  go('s-streets');
 }
 
 function loadHands() {
@@ -1839,7 +1973,7 @@ function openDetail(id) {
   document.getElementById('detail-body').innerHTML=`
     <div class="ana-card">
       <div style="font-size:28px;font-weight:700;letter-spacing:2px;margin-bottom:8px">${hole}</div>
-      <div style="font-size:13px;color:var(--text3)">${h.position||'?'} · ${h.blinds||'?'} · ${h.stage||'?'} · ${h.stackBB||'?'}BB · ${new Date(h.timestamp).toLocaleString('th-TH')}</div>
+      <div style="font-size:13px;color:var(--text3)">${h.position||'?'} · ${h.blinds||'?'} · ${h.stage||'?'} · ${h.stackBB||'?'}BB · ${new Date(h.timestamp).toLocaleString('en-GB')}</div>
     </div>
     <div class="ana-card">
       <div class="ana-title">Action Log</div>
@@ -1864,7 +1998,7 @@ function openDetail(id) {
     </div>`;
   if (h.aiAnalysis) {
     const a = h.aiAnalysis;
-    document.getElementById('detail-ai-result').innerHTML = `<div class="ai-result"><div class="ai-result-label">🐋 DeepSeek <span style="opacity:.5;font-weight:400"> · ${new Date(a.timestamp).toLocaleString('th-TH')}</span></div><div class="ai-result-body">${a.text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>`;
+    document.getElementById('detail-ai-result').innerHTML = `<div class="ai-result"><div class="ai-result-label">🐋 DeepSeek <span style="opacity:.5;font-weight:400"> · ${new Date(a.timestamp).toLocaleString('en-GB')}</span></div><div class="ai-result-body">${a.text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>`;
   }
   go('s-detail');
 }
@@ -1972,7 +2106,7 @@ function renderSessions() {
   list.innerHTML = sessions.map(s => {
     const n = hands.filter(h=>h.sessionId===s.id).length;
     const isActive = s.id === currentSessionId;
-    const date = new Date(s.createdAt).toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'numeric'});
+    const date = new Date(s.createdAt).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
     return `<div class="sess-card${isActive?' active-sess':''}">
       <div class="sess-card-top">
         <div>
@@ -1999,8 +2133,6 @@ function saveModelChoice() {
   const m = document.getElementById('ai-model-input')?.value;
   if (m) localStorage.setItem('ds_model', m);
 }
-
-function updateApiKeyStatus() {}
 
 function initSettingsUI() {
   const sel = document.getElementById('ai-model-input');
