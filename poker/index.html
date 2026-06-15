@@ -1661,6 +1661,14 @@ function handCat(hole) {
   return {hi,lo,suited:c1.suit===c2.suit,paired:v1===v2,gap:hi-lo};
 }
 
+// Preflop strength math needs both hole cards present with KNOWN ranks
+// (suit may be unknown). Returns false for missing or rank-'?' cards so we
+// can show "insufficient info" instead of misleading weak/fold advice.
+function holeRanksKnown() {
+  const [c1,c2] = (H&&H.hole) || [];
+  return !!(c1 && c2 && c1.rank!=='?' && c2.rank!=='?');
+}
+
 function handPct(hole) {
   const cat=handCat(hole); if(!cat) return 0;
   const {hi,lo,suited,paired,gap}=cat;
@@ -1694,7 +1702,9 @@ function strengthAnalysis() {
   const res=[];
   const pct=handPct(), name=handName(), cat=handCat();
   const board=H.board.filter(Boolean);
-  if(pct>=70) res.push({t:'good',i:'💪',txt:`${name} — ~top ${Math.round(100-pct)}% preflop (est., not exact equity). Strong holding.`});
+  if(!holeRanksKnown()) {
+    res.push({t:'info',i:'❔',txt:'Hole card ranks unknown — preflop strength estimate unavailable. Enter both ranks for a verdict.'});
+  } else if(pct>=70) res.push({t:'good',i:'💪',txt:`${name} — ~top ${Math.round(100-pct)}% preflop (est., not exact equity). Strong holding.`});
   else if(pct>=48) res.push({t:'warn',i:'📊',txt:`${name} — playable, ~${Math.round(pct)}th percentile (rough preflop estimate).`});
   else res.push({t:'bad',i:'⚠️',txt:`${name} — below average (rough preflop estimate). Needs good conditions.`});
   if(cat&&cat.suited&&cat.gap<=2) res.push({t:'info',i:'🎯',txt:'Double draw potential: flush + straight draws possible on connected boards.'});
@@ -1731,9 +1741,15 @@ function pushFoldAnalysis() {
   const res=[];
   const pct=handPct(), name=handName();
   res.push({t:'info',i:'📐',txt:`Eff stack: ${eff.toFixed(1)}bb — ${eff<=10?'push/fold territory':'consider push/fold spots'}.`});
-  const thresh=pfThreshold(hpos,eff);
-  if(pct>=thresh) res.push({t:'good',i:'✅',txt:`${name} from ${hpos} at ${eff.toFixed(0)}bb qualifies for a push (top ${Math.round(100-thresh)}% range).`});
-  else res.push({t:'bad',i:'❌',txt:`${name} from ${hpos} at ${eff.toFixed(0)}bb may be too weak to push — consider fold.`});
+  if(!holeRanksKnown()) {
+    res.push({t:'info',i:'❔',txt:'Hole card ranks unknown — push/fold verdict unavailable. Enter both ranks to evaluate.'});
+  } else if(!hpos) {
+    res.push({t:'warn',i:'📍',txt:'Hero position not set — set a position for an accurate push/fold range.'});
+  } else {
+    const thresh=pfThreshold(hpos,eff);
+    if(pct>=thresh) res.push({t:'good',i:'✅',txt:`${name} from ${hpos} at ${eff.toFixed(0)}bb qualifies for a push (top ${Math.round(100-thresh)}% range).`});
+    else res.push({t:'bad',i:'❌',txt:`${name} from ${hpos} at ${eff.toFixed(0)}bb may be too weak to push — consider fold.`});
+  }
   if(['bubble','ft'].includes(stage)) res.push({t:'warn',i:'💰',txt:'ICM spot: tighten push range vs chip leaders, widen vs short stacks.'});
   return res;
 }
