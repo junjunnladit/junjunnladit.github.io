@@ -1025,6 +1025,9 @@ function getSeenPositions(upToStreet, upToIdx) {
 // Postflop betting order (first to act → last): SB, BB, then around the table.
 const POSTFLOP_ORDER = ['SB','BB','UTG','UTG+1','MP','HJ','CO','BTN'];
 
+// Preflop betting order (first to act → last): UTG … BTN, then the blinds.
+const PREFLOP_ORDER = ['UTG','UTG+1','MP','HJ','CO','BTN','SB','BB'];
+
 // Resolve a pos label ('Hero'/'Villain'/named) to its actual table seat so we
 // can order it. Hero and Villain sit at the seats chosen during setup.
 function seatOf(pos) {
@@ -1033,18 +1036,96 @@ function seatOf(pos) {
   return pos;
 }
 
+// Canonical key for grouping actions by player. An action can be tagged with the
+// logical label ('Hero'/'Villain') OR the actual seat ('SB', 'BB', …); both must
+// collapse to the same player so contributions aren't split across labels.
+function canonSeat(pos) { return seatOf(pos) || pos; }
+
 function postflopRank(pos) {
   const i = POSTFLOP_ORDER.indexOf(seatOf(pos));
   return i === -1 ? 99 : i;
+}
+
+// Ordered list of seats still eligible to act preflop at a given point in the
+// log. A seat drops off once it has acted at the current bet level, and
+// reappears only when a later raise reopens the action. Seats earlier in order
+// that were skipped over are treated as folded and left out. The list is
+// rotated to start with the next player to act.
+function getPreflopEligible(upToIdx) {
+  const acts = (AS.pre?.actions || []).slice(0, upToIdx);
+  const sb = +(H?.setup?.sb) || 0;
+  const bb = +(H?.setup?.bb) || 0;
+
+  const committed = {};            // seat -> chips in this round
+  if (sb) committed['SB'] = sb;
+  if (bb) committed['BB'] = bb;
+  let currentBet = Math.max(bb, 0);
+  const folded = new Set();
+  const seen = new Set();          // seats with a logged action
+  const actedLevel = new Set();    // seats that have acted since the last raise
+  let lastActorIdx = -1;           // PREFLOP_ORDER index of the most recent actor
+
+  acts.forEach(a => {
+    const seat = canonSeat(a.pos);
+    const oi = PREFLOP_ORDER.indexOf(seat);
+    if (oi === -1) return;          // 'Villain'/unknown: ignore for ordering
+    seen.add(seat);
+    lastActorIdx = oi;
+    if (a.type === 'Fold') { folded.add(seat); actedLevel.add(seat); return; }
+    const size = parseFloat(a.size) || 0;
+    if (['Bet','Raise','All-in'].includes(a.type) && size > currentBet) {
+      committed[seat] = size;
+      currentBet = size;
+      actedLevel.clear();          // a raise reopens the round
+      actedLevel.add(seat);
+    } else {                       // Call / Check / short all-in
+      committed[seat] = Math.max(committed[seat] || 0, a.type === 'Call' ? currentBet : size);
+      actedLevel.add(seat);
+    }
+  });
+
+  // A never-seen seat that the action has already moved past is an implicit
+  // fold and can never re-enter (only seats already in the pot get reopened).
+  let maxSeenIdx = -1;
+  seen.forEach(s => { const i = PREFLOP_ORDER.indexOf(s); if (i > maxSeenIdx) maxSeenIdx = i; });
+
+  // Owes action: in the hand, not folded, and not yet closed at the current bet.
+  const owes = seat => {
+    if (folded.has(seat)) return false;
+    const inHand = seen.has(seat) || (seat === 'SB' && sb) || (seat === 'BB' && bb);
+    if (!inHand) return false;
+    const closed = actedLevel.has(seat) && (committed[seat] || 0) >= currentBet;
+    return !closed;
+  };
+
+  // Walk the table starting just after the last actor, one full lap.
+  const start = lastActorIdx + 1;
+  const eligible = [];
+  let wrapped = false;
+  for (let k = 0; k < PREFLOP_ORDER.length; k++) {
+    const idx = (start + k) % PREFLOP_ORDER.length;
+    if (idx < start) wrapped = true;             // passed the end of the table
+    const seat = PREFLOP_ORDER[idx];
+    if (folded.has(seat)) continue;
+    if (owes(seat)) eligible.push(seat);
+    else if (!seen.has(seat) && !wrapped && idx > maxSeenIdx) eligible.push(seat); // fresh seat yet to enter
+  }
+  return eligible;
 }
 
 function getActivePositions(currentStreet, upToIdx) {
   const folded = getFoldedPositions(currentStreet, upToIdx);
 
   if (currentStreet === 'pre') {
-    // Preflop: any named position can be added (we're building the action log).
-    // "Villain" is a catch-all kept at the bottom of the list.
-    return [...POSITIONS.filter(p => !folded.has(p)), 'Villain'];
+    // Preflop: only positions still owed action, in betting order. A seat that
+    // already acted reappears only when a raise reopens the round. "Hero" and
+    // "Villain" are catch-all labels (resolving to the seats picked in setup)
+    // kept at the bottom for when the exact seat isn't certain — Hero first,
+    // then Villain.
+    const list = getPreflopEligible(upToIdx);
+    if (!folded.has('Hero')) list.push('Hero');
+    if (!folded.has('Villain')) list.push('Villain');
+    return list;
   }
 
   // Post-flop: only positions already seen in this hand (preflop + earlier streets + current street so far)
@@ -1066,7 +1147,8 @@ function addAction(street) {
   const active = getActivePositions(street, AS[street].actions.length);
   let defaultPos;
   if (street === 'pre') {
-    defaultPos = active.includes('Hero') ? 'Hero' : active[0] || 'Villain';
+    // Default to the next player to act (already first in betting order).
+    defaultPos = active[0] || 'Villain';
   } else {
     // Postflop: auto-fill the next player to act after the last entry, in table
     // order. Skip the "Villain" catch-all — only named seats are auto-selected.
@@ -1092,8 +1174,9 @@ function removeAction(street, i) {
 
 function getPlayerStartStack(pos) {
   if (!H?.setup) return null;
-  if (pos === 'Hero') return H.setup.hs || null;
-  if (H.setup.vpos && pos === H.setup.vpos) return H.setup.vs || null;
+  const seat = seatOf(pos);
+  if (seat && seat === H.setup.hpos) return H.setup.hs || null;
+  if (seat && seat === H.setup.vpos) return H.setup.vs || null;
   return null;
 }
 
@@ -1102,8 +1185,9 @@ function calcPlayerInvestment(pos, currentStreet, upToIdx) {
   for (const s of STREETS_LIST) {
     const acts = AS[s]?.actions || [];
     const limit = s === currentStreet ? upToIdx : acts.length;
+    const target = canonSeat(pos);
     const sizes = acts.slice(0, limit)
-      .filter(a => a.pos === pos && ['Bet','Raise','Call','All-in'].includes(a.type))
+      .filter(a => canonSeat(a.pos) === target && ['Bet','Raise','Call','All-in'].includes(a.type))
       .map(a => parseFloat(a.size) || 0);
     if (sizes.length) total += Math.max(...sizes);
     if (s === currentStreet) break;
@@ -1357,6 +1441,16 @@ function closeBoard() { document.getElementById('board-overlay').style.display='
 function refreshBoardPicker() {
   const used = usedCards();
   const wrap = document.getElementById('board-picker');
+  const rankOnlyRow = `<div class="suit-row-p">
+    <div class="suit-hdr" style="color:var(--text3)">Rank only (suit unknown)</div>
+    <div class="cards-row">
+      ${RANKS.map(rank =>
+        `<div class="pc" onclick="pickBoardCard('${rank}?')"
+          style="background:#2a2d3e;border:2px dashed var(--text3);color:var(--text2)">
+          <span>${rank}</span><span style="font-size:9px;color:var(--text3)">?</span></div>`
+      ).join('')}
+    </div>
+  </div>`;
   const unknownRow = `<div class="suit-row-p">
     <div class="suit-hdr" style="color:var(--text3)">Unknown</div>
     <div class="cards-row">
@@ -1382,7 +1476,7 @@ function refreshBoardPicker() {
         }).join('')}
       </div>
     </div>`;
-  }).join('') + unknownRow;
+  }).join('') + rankOnlyRow + unknownRow;
 }
 
 function pickBoardCard(cid) {
@@ -1484,9 +1578,10 @@ function autoEvaluate() {
 // Total chips a player put in across all streets (their preflop "to" amount
 // already includes any blind they posted, mirroring calcStreetContrib).
 function playerTotalContrib(pos) {
+  const target = canonSeat(pos);
   let inv=0;
   STREETS_LIST.forEach(street=>{
-    const sizes=(AS[street]?.actions||[]).filter(a=>a.pos===pos&&['Bet','Raise','Call','All-in'].includes(a.type)).map(a=>parseFloat(a.size)||0);
+    const sizes=(AS[street]?.actions||[]).filter(a=>canonSeat(a.pos)===target&&['Bet','Raise','Call','All-in'].includes(a.type)).map(a=>parseFloat(a.size)||0);
     if(sizes.length) inv+=Math.max(0,...sizes);
   });
   return inv;
@@ -1499,14 +1594,15 @@ function calcHeroInvestment() { return playerTotalContrib('Hero'); }
 // (side-pot aware). Dead money (antes + blinds from players who never acted)
 // is whatever the running pot has beyond the tracked contributions.
 function calcHeroNetWin() {
+  const heroSeat = canonSeat('Hero');
   const heroC = playerTotalContrib('Hero');
-  const seen = new Set();
-  STREETS_LIST.forEach(s => (AS[s]?.actions||[]).forEach(a => { if (a.pos) seen.add(a.pos); }));
+  const seats = new Set();
+  STREETS_LIST.forEach(s => (AS[s]?.actions||[]).forEach(a => { if (a.pos) seats.add(canonSeat(a.pos)); }));
   let contribSum = 0, matched = 0;
-  seen.forEach(p => {
-    const c = playerTotalContrib(p);
+  seats.forEach(seat => {
+    const c = playerTotalContrib(seat);
     contribSum += c;
-    if (p !== 'Hero') matched += Math.min(c, heroC);
+    if (seat !== heroSeat) matched += Math.min(c, heroC);
   });
   const dead = Math.max(0, calcRunningPot('river') - contribSum);
   return matched + dead;
@@ -1841,14 +1937,20 @@ function getModel() {
 
 async function callAI(prompt) {
   const model = getModel();
+  // deepseek-reasoner (R1) spends tokens on chain-of-thought before writing
+  // the final answer, so it needs a much larger budget than deepseek-chat.
+  const isReasoner = model === 'deepseek-reasoner';
   const res = await fetch(DS_URL, {
     method:'POST',
     headers:{'Content-Type':'application/json','Authorization':'Bearer '+_DS},
-    body:JSON.stringify({model, max_tokens:1024, messages:[{role:'user',content:prompt}]})
+    body:JSON.stringify({model, max_tokens:isReasoner?8000:4096, messages:[{role:'user',content:prompt}]})
   });
   if (!res.ok) { const e=await res.json().catch(()=>({})); throw new Error(e.error?.message||'API error '+res.status); }
   const data = await res.json();
-  return data.choices?.[0]?.message?.content || 'No response.';
+  const msg = data.choices?.[0]?.message;
+  // R1 puts its answer in content; fall back to reasoning_content if the
+  // answer got truncated so we surface something rather than "No response."
+  return msg?.content || msg?.reasoning_content || 'No response.';
 }
 
 async function runAIAnalysis(hand, btnEl, areaEl) {
