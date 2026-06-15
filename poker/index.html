@@ -348,6 +348,7 @@ textarea.notes:focus{border-color:var(--blue);outline:none}
   <div class="sec">
     <div class="row"><span class="row-label">Stage</span>
       <select id="i-stage">
+        <option value="">—</option>
         <optgroup label="── Tournament ──">
         <option value="early">Early</option><option value="middle">Middle</option>
         <option value="late">Late</option><option value="bubble">Bubble 🫧</option>
@@ -364,13 +365,13 @@ textarea.notes:focus{border-color:var(--blue);outline:none}
     </div>
     <div class="row"><span class="row-label">Blinds SB / BB</span>
       <div style="display:flex;gap:5px;align-items:center">
-        <input type="number" id="i-sb" value="100" style="width:65px" oninput="renderPots()">
+        <input type="number" inputmode="numeric" id="i-sb" value="100" style="width:65px" oninput="renderPots()">
         <span style="color:var(--text3)">/</span>
-        <input type="number" id="i-bb" value="200" style="width:65px" oninput="renderPots()">
+        <input type="number" inputmode="numeric" id="i-bb" value="200" style="width:65px" oninput="renderPots()">
       </div>
     </div>
     <div class="row"><span class="row-label">Ante</span>
-      <input type="number" id="i-ante" value="200" placeholder="0" oninput="renderPots()" style="width:120px">
+      <input type="number" inputmode="numeric" id="i-ante" value="200" placeholder="0" oninput="renderPots()" style="width:120px">
     </div>
     <div class="row"><span class="row-label">Ante type</span>
       <div style="display:flex;gap:6px">
@@ -379,7 +380,7 @@ textarea.notes:focus{border-color:var(--blue);outline:none}
       </div>
     </div>
     <div class="row"><span class="row-label">Players at table</span>
-      <input type="number" id="i-players" value="9" min="2" max="10" oninput="renderPots()" style="width:120px">
+      <input type="number" inputmode="numeric" id="i-players" value="9" min="2" max="10" oninput="renderPots()" style="width:120px">
     </div>
   </div>
 
@@ -392,7 +393,7 @@ textarea.notes:focus{border-color:var(--blue);outline:none}
       </select>
     </div>
     <div class="row"><span class="row-label">Stack (chips)</span>
-      <input type="number" id="i-hstack" placeholder="optional">
+      <input type="number" inputmode="numeric" id="i-hstack" placeholder="optional">
     </div>
   </div>
 
@@ -405,7 +406,7 @@ textarea.notes:focus{border-color:var(--blue);outline:none}
       </select>
     </div>
     <div class="row"><span class="row-label">Stack (chips)</span>
-      <input type="number" id="i-vstack" placeholder="optional">
+      <input type="number" inputmode="numeric" id="i-vstack" placeholder="optional">
     </div>
   </div>
 </div>
@@ -870,10 +871,6 @@ function buildHolePicker() {
         style="background:#2a2d3e;border:2px dashed var(--text3);color:var(--text3)">
         <span style="font-size:18px">?</span>
       </div>
-      ${SUITS.map(s =>
-        `<div class="pc ${pSuitClass(s)}" data-cid="?${s}" onclick="pickHoleCard(this,'?${s}')">
-          <span>?</span><span style="font-size:9px">${SYM[s]}</span></div>`
-      ).join('')}
       ${RANKS.map(rank =>
         `<div class="pc" data-cid="${rank}?" onclick="pickHoleCard(this,'${rank}?')" style="color:#1a1a1a">
           <span>${rank}</span><span style="font-size:9px;color:#999">?</span></div>`
@@ -889,6 +886,8 @@ function buildHolePicker() {
           return `<div class="pc ${pSuitClass(suit)}" data-cid="${cid}" onclick="pickHoleCard(this,'${cid}')"
             ><span>${rank}</span><span style="font-size:9px">${SYM[suit]}</span></div>`;
         }).join('')}
+        <div class="pc ${pSuitClass(suit)}" data-cid="?${suit}" onclick="pickHoleCard(this,'?${suit}')"
+          ><span>?</span><span style="font-size:9px">${SYM[suit]}</span></div>
       </div>
     </div>`;
   }).join('') + unknownRow;
@@ -1181,7 +1180,7 @@ function renderAE(street) {
         <button class="ae-del" onclick="removeAction('${street}',${i})">✕</button>
       </div>
       <div class="ae-btns">${btns}</div>
-      ${needsSize ? `<input class="ae-size" type="number" placeholder="${a.type==='Call'&&lb?'Call '+lb:'Total amount(chips)'}" value="${a.size}" oninput="AS['${street}'].actions[${i}].size=this.value;renderPots();autoUpdateProfit()">` : ''}
+      ${needsSize ? `<input class="ae-size" type="number" inputmode="numeric" placeholder="${a.type==='Call'&&lb?'Call '+lb:'Total amount(chips)'}" value="${a.size}" oninput="AS['${street}'].actions[${i}].size=this.value;renderPots();autoUpdateProfit()">` : ''}
       ${a.type==='Call'&&lb&&!a.size ? `<div class="ae-hint">↑ Calling ${lb} chips</div>` : ''}
       ${['Bet','Raise'].includes(a.type) ? `<div class="ae-hint">Enter the total amount bet TO, not the raise increment.</div>` : ''}
       ${allinHint}
@@ -1936,7 +1935,7 @@ function editHand(id) {
   draftScreen = null;
 
   // Populate the setup form so going Back stays consistent.
-  document.getElementById('i-stage').value   = H.setup.stage || 'early';
+  document.getElementById('i-stage').value   = H.setup.stage || '';
   document.getElementById('i-sb').value       = sb;
   document.getElementById('i-bb').value       = bb;
   document.getElementById('i-ante').value     = H.setup.ante || 0;
