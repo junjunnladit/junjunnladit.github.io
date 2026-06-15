@@ -388,8 +388,9 @@ textarea.notes:focus{border-color:var(--blue);outline:none}
   <div class="sec">
     <div class="row"><span class="row-label">Position</span>
       <select id="i-hpos">
+        <option value="" selected>—</option>
         <option>UTG</option><option>UTG+1</option><option>MP</option><option>HJ</option>
-        <option>CO</option><option selected>BTN</option><option>SB</option><option>BB</option>
+        <option>CO</option><option>BTN</option><option>SB</option><option>BB</option>
       </select>
     </div>
     <div class="row"><span class="row-label">Stack (chips)</span>
@@ -401,8 +402,9 @@ textarea.notes:focus{border-color:var(--blue);outline:none}
   <div class="sec">
     <div class="row"><span class="row-label">Position</span>
       <select id="i-vpos">
+        <option value="" selected>—</option>
         <option>UTG</option><option>UTG+1</option><option>MP</option><option>HJ</option>
-        <option>CO</option><option>BTN</option><option>SB</option><option selected>BB</option>
+        <option>CO</option><option>BTN</option><option>SB</option><option>BB</option>
       </select>
     </div>
     <div class="row"><span class="row-label">Stack (chips)</span>
@@ -1940,9 +1942,9 @@ function editHand(id) {
   document.getElementById('i-bb').value       = bb;
   document.getElementById('i-ante').value     = H.setup.ante || 0;
   document.getElementById('i-players').value  = H.setup.players;
-  document.getElementById('i-hpos').value     = H.setup.hpos || 'BTN';
+  document.getElementById('i-hpos').value     = H.setup.hpos || '';
   document.getElementById('i-hstack').value   = hs != null ? hs : '';
-  document.getElementById('i-vpos').value     = H.setup.vpos || 'BB';
+  document.getElementById('i-vpos').value     = H.setup.vpos || '';
   document.getElementById('i-vstack').value   = vs != null ? vs : '';
   document.querySelectorAll('[data-ante]').forEach(e=>e.classList.toggle('on', e.dataset.ante===anteType));
 
